@@ -22,6 +22,8 @@ android.allow_backup = True
 [buildozer]
 log_level = 2
 warn_on_root = 1
-# 关键：固定用 p4a 的稳定分支(master)，它内置 Python 3.11.5，与 Kivy 2.3.x 完全兼容。
-# 绝不能用 develop 分支——那里的 python3 配方是 Python 3.14，Kivy 的 C 扩展编译不过。
-p4a.branch = master
+# 关键：锁定 p4a 到 v2024.01.21 这个稳定版本。
+# 它内置 Python 3.11.5，与 Kivy 2.3.x 完全兼容。
+# 说明：master/develop 分支内置的是 Python 3.14，其自带 pip 与 p4a 不兼容
+#       (ImportError: BuildDependencyInstallError)，且 Kivy 的 C 扩展编译不过。
+p4a.branch = v2024.01.21
