@@ -742,7 +742,7 @@ class ImageGenClient:
                 if not url:
                     on_ok({"error": "生成失败：返回内容解析失败"})
                     return
-                out = os.path.join(BASE_DIR, "last_gen.png")
+                out = os.path.join(DATA_DIR, "last_gen.png")
                 ok = False
                 try:
                     with urllib.request.urlopen(urllib.request.Request(url), timeout=90) as img:
