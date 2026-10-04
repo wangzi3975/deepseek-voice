@@ -61,10 +61,19 @@ jobs:
           yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
           echo "✅ cmdline-tools 就位"
 
+      # 彻底清掉上一次构建留下的 p4a / python-for-android 缓存。
+      # 否则旧分支的 Python 版本(3.14)配方会残留在缓存里，导致 Kivy 编译失败。
+      - name: Clean buildozer and p4a caches
+        run: |
+          buildozer android clean || true
+          rm -rf .buildozer/android/platform/python-for-android
+          rm -rf .buildozer/android/platform/build-* || true
+          echo "✅ 缓存已清理"
+
       - name: Build APK
         run: |
           set -o pipefail
-          yes | buildozer -v android debug > build_full.log 2>&1
+          yes | buildozer -v android debug 2>&1 | tee build_full.log
           echo "构建完成"
 
       - name: Show build log tail if failed
