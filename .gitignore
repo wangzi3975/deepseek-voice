@@ -1,0 +1,9 @@
+config.json
+*.log
+.buildozer/
+bin/
+__pycache__/
+*.pyc
+sessions.json
+Bug日志.txt
+.log_del_ts
