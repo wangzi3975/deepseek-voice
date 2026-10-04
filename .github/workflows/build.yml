@@ -29,18 +29,14 @@ jobs:
             pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev \
             libtinfo6 cmake libffi-dev libssl-dev gettext libltdl-dev
 
+      # Cython 3.0.x 才能配 Kivy 2.3.x（0.29.x 会编译失败）
       - name: Setup Buildozer and Cython
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          pip install "cython==0.29.36" buildozer
+          pip install "cython==3.0.11" buildozer
 
-      - name: Cache Buildozer global directory
-        uses: actions/cache@v4
-        with:
-          path: ~/.buildozer
-          key: buildozer-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}-v4
+      # 不再缓存 ~/.buildozer，避免缓存里残留旧的 Kivy recipe 导致版本错配
 
-      # 关键：清掉 runner 自带 ANDROID_SDK_ROOT/NDK 变量，避免与 buildozer 的 SDK 冲突
       - name: Clean conflicting Android env vars
         run: |
           echo "ANDROID_HOME=" >> $GITHUB_ENV
@@ -48,7 +44,6 @@ jobs:
           echo "ANDROID_NDK_ROOT=" >> $GITHUB_ENV
           echo "ANDROID_NDK_HOME=" >> $GITHUB_ENV
 
-      # 预装 cmdline-tools 到 buildozer 期望的老路径 tools/bin/sdkmanager
       - name: Pre-install Android SDK cmdline-tools
         run: |
           set -e
@@ -66,7 +61,6 @@ jobs:
           yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
           echo "✅ cmdline-tools 就位"
 
-      # 完整日志落盘，失败后可下载诊断（不再用 tail 截断）
       - name: Build APK
         run: |
           set -o pipefail
@@ -76,8 +70,8 @@ jobs:
       - name: Show build log tail if failed
         if: failure()
         run: |
-          echo "===== 构建日志最后 150 行 ====="
-          tail -150 build_full.log || true
+          echo "===== 构建日志最后 200 行 ====="
+          tail -200 build_full.log || true
 
       - name: Upload full build log
         if: always()
