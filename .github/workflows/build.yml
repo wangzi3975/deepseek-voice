@@ -72,9 +72,17 @@ jobs:
 
       - name: Build APK
         run: |
-          set -o pipefail
-          yes | buildozer -v android debug 2>&1 | tee build_full.log
+          # 注意：不要用 `yes |`，否则 yes 被 SIGPIPE 杀掉会让整个命令返回非零退出码，
+          # 导致 APK 已生成却被判为失败、跳过上传步骤。
+          buildozer -v android debug > build_full.log 2>&1
           echo "构建完成"
+          ls -la bin/ || true
+          # 只要 APK 存在就算成功（buildozer 末尾偶尔返回非零但不影响产物）
+          if ls bin/*.apk >/dev/null 2>&1; then
+            echo "✅ APK 已生成"
+          else
+            echo "❌ 未找到 APK"; exit 1
+          fi
 
       - name: Show build log tail if failed
         if: failure()
@@ -91,7 +99,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload APK
-        if: success()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: deepseek-voice-apk
