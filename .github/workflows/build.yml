@@ -35,8 +35,6 @@ jobs:
           python -m pip install --upgrade pip setuptools wheel
           pip install "cython==3.0.11" buildozer
 
-      # 不再缓存 ~/.buildozer，避免缓存里残留旧的 Kivy recipe 导致版本错配
-
       - name: Clean conflicting Android env vars
         run: |
           echo "ANDROID_HOME=" >> $GITHUB_ENV
@@ -61,8 +59,20 @@ jobs:
           yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
           echo "✅ cmdline-tools 就位"
 
-      # 彻底清掉上一次构建留下的 p4a / python-for-android 缓存。
-      # 否则旧分支的 Python 版本(3.14)配方会残留在缓存里，导致 Kivy 编译失败。
+      # 生成发布签名证书（release 签名包在华为等设备上不会被安全机制拦截；
+      # debug 包带 android:debuggable=true，部分国产系统会直接拒绝启动）
+      - name: Generate release keystore + export signing env
+        run: |
+          keytool -genkeypair -v -keystore "$RUNNER_TEMP/release.keystore" \
+            -alias deepseek -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass deepseek2024 -keypass deepseek2024 \
+            -dname "CN=DeepSeekVoice, OU=Dev, O=Personal, L=City, ST=State, C=CN"
+          echo "P4A_RELEASE_KEYSTORE=$RUNNER_TEMP/release.keystore" >> $GITHUB_ENV
+          echo "P4A_RELEASE_KEYSTORE_PASSWD=deepseek2024" >> $GITHUB_ENV
+          echo "P4A_RELEASE_KEYALIAS=deepseek" >> $GITHUB_ENV
+          echo "P4A_RELEASE_KEYALIAS_PASSWD=deepseek2024" >> $GITHUB_ENV
+          echo "✅ 签名环境变量已导出"
+
       - name: Clean buildozer and p4a caches
         run: |
           buildozer android clean || true
@@ -70,19 +80,41 @@ jobs:
           rm -rf .buildozer/android/platform/build-* || true
           echo "✅ 缓存已清理"
 
-      - name: Build APK
+      # 注意：不要用 `yes |`，否则 yes 被 SIGPIPE 杀掉会让整个命令返回非零退出码，
+      # 导致 APK 已生成却被判为失败、跳过上传步骤。
+      # 这里构建 release 版（已签名），并显式产出 apk（默认 release 产物是 aab）。
+      - name: Build signed release APK
         run: |
-          # 注意：不要用 `yes |`，否则 yes 被 SIGPIPE 杀掉会让整个命令返回非零退出码，
-          # 导致 APK 已生成却被判为失败、跳过上传步骤。
-          buildozer -v android debug > build_full.log 2>&1
-          echo "构建完成"
+          buildozer -v android release > build_full.log 2>&1 || true
+          echo "构建命令返回，检查产物..."
           ls -la bin/ || true
-          # 只要 APK 存在就算成功（buildozer 末尾偶尔返回非零但不影响产物）
+          if ! ls bin/*.apk >/dev/null 2>&1; then
+            echo "⚠️ release 未产出 apk，改试 debug 构建"
+            buildozer -v android debug >> build_full.log 2>&1 || true
+          fi
+          ls -la bin/ || true
           if ls bin/*.apk >/dev/null 2>&1; then
             echo "✅ APK 已生成"
           else
             echo "❌ 未找到 APK"; exit 1
           fi
+
+      - name: Verify APK signing and permissions
+        if: always()
+        run: |
+          APK=$(ls bin/*.apk 2>/dev/null | head -1)
+          if [ -z "$APK" ]; then echo "无 APK"; exit 0; fi
+          echo "=== 产物: $APK ==="
+          BT=$(ls -d $HOME/.buildozer/android/platform/android-sdk/build-tools/* 2>/dev/null | head -1)
+          echo "build-tools: $BT"
+          if [ -n "$BT" ]; then
+            echo "--- 签名信息 ---"
+            "$BT/aapt" dump badging "$APK" 2>/dev/null | grep -iE "package|sdkVersion|uses-permission|application-debuggable" || true
+          fi
+          echo "--- 是否可调试(debuggable) ---"
+          unzip -p "$APK" AndroidManifest.xml 2>/dev/null | strings | grep -i debuggable || echo "(未检出)"
+          echo "--- 文件大小 ---"
+          stat -c "%n %s bytes" "$APK"
 
       - name: Show build log tail if failed
         if: failure()
