@@ -82,17 +82,20 @@ jobs:
 
       # 注意：不要用 `yes |`，否则 yes 被 SIGPIPE 杀掉会让整个命令返回非零退出码，
       # 导致 APK 已生成却被判为失败、跳过上传步骤。
-      # 这里构建 release 版（已签名），并显式产出 apk（默认 release 产物是 aab）。
+      # release 模式 + 显式指定产物为 apk（android.release_artifact=apk，见 buildozer.spec），
+      # 这样得到的是"已签名、非 debuggable"的正式包，可避开国产系统的 debug 包拦截。
       - name: Build signed release APK
         run: |
           buildozer -v android release > build_full.log 2>&1 || true
           echo "构建命令返回，检查产物..."
           ls -la bin/ || true
-          if ! ls bin/*.apk >/dev/null 2>&1; then
-            echo "⚠️ release 未产出 apk，改试 debug 构建"
+          if ls bin/*.apk >/dev/null 2>&1; then
+            echo "✅ 已签名 release APK 生成"
+          else
+            echo "⚠️ release 未产出 apk，回退 debug 构建"
             buildozer -v android debug >> build_full.log 2>&1 || true
+            ls -la bin/ || true
           fi
-          ls -la bin/ || true
           if ls bin/*.apk >/dev/null 2>&1; then
             echo "✅ APK 已生成"
           else
