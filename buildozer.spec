@@ -34,6 +34,9 @@ android.archs = arm64-v8a
 android.accept_sdk_license = True
 android.allow_backup = True
 
+# release 构建时产出 apk（默认是 aab，aab 不能直接装到手机）
+android.release_artifact = apk
+
 [buildozer]
 log_level = 2
 warn_on_root = 1
