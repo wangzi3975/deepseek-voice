@@ -6,8 +6,8 @@ source.dir = .
 source.include_exts = py,png,jpg,jpeg,kv,atlas,json,ttf
 source.exclude_dirs = _release,_shots,bin,.buildozer,__pycache__,logs,saved
 version = 0.1
-# Kivy 用 Git URL 强制指定，绕过 p4a 内置 recipe 的旧版本缓存
-requirements = python3,kivy==https://github.com/kivy/kivy/archive/refs/tags/2.3.1.zip,requests,pyjnius,android,urllib3,certifi,chardet,idna,plyer,pillow
+# Kivy 2.3.1：修复了与新版 Python C API 的编译兼容问题
+requirements = python3,kivy==2.3.1,requests,pyjnius,android,urllib3,certifi,chardet,idna,plyer,pillow
 orientation = portrait
 fullscreen = 0
 icon.filename = %(source.dir)s/icon/app_icon.png
