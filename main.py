@@ -49,10 +49,67 @@ except Exception:
     _HAS_PLYER = False
 
 # ==================== 路径 ====================
+# BASE_DIR：只读资源目录（随 APK 打包，如 personas.json、头像图片）
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
-PERSONA_FILE = os.path.join(BASE_DIR, "personas.json")
-SESSION_FILE = os.path.join(BASE_DIR, "sessions.json")
+
+# 【关键修复】DATA_DIR：可写目录。
+# 安卓上 __file__ 所在目录（APK 内部）是只读的，往里面写 config.json /
+# sessions.json / 日志会抛 PermissionError，导致一点图标就闪退。
+# 桌面 / Windows 上仍沿用原目录，保持行为不变。
+def _resolve_data_dir():
+    # 1) 安卓（python-for-android 注入的环境变量，优先使用）
+    for _env in ("ANDROID_PRIVATE", "ANDROID_APP_PATH", "ANDROID_ARGUMENT"):
+        _p = os.environ.get(_env)
+        if _p:
+            try:
+                if os.path.isdir(_p):
+                    return _p
+            except Exception:
+                pass
+    # 2) Kivy 的可写数据目录（安卓为 /data/data/<包名>/files）
+    try:
+        from kivy.utils import platform as _kpy_platform
+        if _kpy_platform == "android":
+            from kivy.app import App as _KApp
+            _d = _KApp().user_data_dir  # 延迟取，失败则走兜底
+            if _d:
+                return _d
+    except Exception:
+        pass
+    # 3) 桌面 / Windows：沿用脚本所在目录
+    return BASE_DIR
+
+
+DATA_DIR = _resolve_data_dir()
+try:
+    os.makedirs(DATA_DIR, exist_ok=True)
+except Exception:
+    DATA_DIR = BASE_DIR
+
+CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
+PERSONA_FILE = os.path.join(DATA_DIR, "personas.json")
+SESSION_FILE = os.path.join(DATA_DIR, "sessions.json")
+
+# 只读资源目录下的人设文件（随 APK 打包）
+PERSONA_SRC = os.path.join(BASE_DIR, "personas.json")
+# 首次运行：把打包内的只读 personas.json 复制到可写目录，
+# 否则安卓上读不到默认人设、且后续保存人设会失败。
+if DATA_DIR != BASE_DIR and not os.path.isfile(PERSONA_FILE):
+    try:
+        import shutil as _shutil
+        if os.path.isfile(PERSONA_SRC):
+            _shutil.copyfile(PERSONA_SRC, PERSONA_FILE)
+    except Exception:
+        try:
+            if os.path.isfile(PERSONA_SRC):
+                with open(PERSONA_SRC, "r", encoding="utf-8") as _f:
+                    _t = _f.read()
+                with open(PERSONA_FILE, "w", encoding="utf-8") as _f:
+                    _f.write(_t)
+        except Exception:
+            pass
+
+# 头像等只读资源仍从打包目录读
 AVATAR_DIR = os.path.join(BASE_DIR, "assets", "avatars")
 if not os.path.isdir(AVATAR_DIR):
     try:
@@ -173,6 +230,38 @@ if platform.system() != "Windows":
             if os.path.isfile(_p):
                 LabelBase.register(name=FONT_CN, fn_regular=_p)
                 break
+        except Exception:
+            pass
+
+# 【关键修复】SegoeSym / SegoeEmoji 是 Windows 专属字体，安卓上不存在。
+# 若未注册，代码中大量 font_name="SegoeSym"/"SegoeEmoji" 的 Label 会在
+# 构建界面的瞬间抛 OSError: File 'SegoeSym.ttf' not found → 启动闪退。
+# 这里在非 Windows 环境下，把这几个名字统一指向一个确实存在的字体
+# （优先中文字体兜底文件，其次 Kivy 自带字体），保证标签能正常创建。
+_FALLBACK_FONT = None
+if platform.system() != "Windows":
+    for _p in ("/system/fonts/NotoSansCJK-Regular.ttc",
+               "/system/fonts/DroidSansFallback.ttf",
+               "/system/fonts/NotoSansSC-Regular.otf",
+               "/system/fonts/Roboto-Regular.ttf"):
+        try:
+            if os.path.isfile(_p):
+                _FALLBACK_FONT = _p
+                break
+        except Exception:
+            pass
+    if _FALLBACK_FONT:
+        for _name in ("MicrosoftYaHei", "SegoeSym", "SegoeEmoji"):
+            try:
+                LabelBase.register(name=_name, fn_regular=_FALLBACK_FONT)
+            except Exception:
+                pass
+    else:
+        # 最后的兜底：用 Kivy 内置 Roboto，至少不让字体缺失导致崩溃
+        try:
+            from kivy.core.text import LabelBase as _LB2
+            _LB2.register(name="SegoeSym", fn_regular="Roboto")
+            _LB2.register(name="SegoeEmoji", fn_regular="Roboto")
         except Exception:
             pass
 
@@ -3071,7 +3160,7 @@ class ImageGenPopup(Popup):
     def _save(self):
         if not self._has_new or not self.result_img.source:
             return
-        out_dir = os.path.join(BASE_DIR, "images")
+        out_dir = os.path.join(DATA_DIR, "images")
         try:
             os.makedirs(out_dir, exist_ok=True)
         except Exception:
@@ -3514,7 +3603,13 @@ class DeepSeekVoiceApp(App):
 
     def build(self):
         Window.clearcolor = BG_2
-        Window.size = (1100, 760)
+        # 【关键修复】安卓上 SDL2 窗口由系统管理，赋值 Window.size 会导致
+        # 启动即崩溃（窗口 resize 请求系统不支持）。仅桌面环境设置。
+        if not IS_ANDROID:
+            try:
+                Window.size = (1100, 760)
+            except Exception:
+                pass
         self.cfg = load_json(CONFIG_FILE, DEFAULT_CONFIG)
         if not os.path.exists(CONFIG_FILE):
             save_json(CONFIG_FILE, self.cfg)
@@ -4265,7 +4360,7 @@ except Exception:
     _HAS_EXC_MGR = False
 
 
-LOG_DIR = os.path.join(BASE_DIR, "logs")
+LOG_DIR = os.path.join(DATA_DIR, "logs")
 LOG_FILE = os.path.join(LOG_DIR, "Bug日志.txt")
 LOG_MARK = os.path.join(LOG_DIR, ".bug_mark")
 LOG_COOLDOWN = 7 * 24 * 3600
