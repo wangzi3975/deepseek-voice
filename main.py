@@ -9,6 +9,146 @@ DeepSeek 语音助手 —— Kivy 安卓版完整功能实现
 Windows 上本地预览与截图验证；安卓上自动启用原生 TTS。
 """
 
+# ============================================================
+# 【超早期崩溃捕获】务必放在所有 import 之前。
+# 目的：即使在导入 Kivy / 构建界面阶段崩溃（此时 Kivy 的异常处理器还没装上），
+# 也能把堆栈写进文件，便于定位"点开就闪退"的真正原因。
+# 输出位置（按优先级）：ANDROID_PRIVATE / ANDROID_APP_PATH -> 外部可读目录。
+# ============================================================
+def _dsv_early_crashlog():
+    import sys as _s, os as _o, traceback as _tb, time as _t
+    try:
+        _dirs = []
+        for _env in ("ANDROID_PRIVATE", "ANDROID_APP_PATH"):
+            _p = _o.environ.get(_env)
+            if _p:
+                _dirs.append(_p)
+        try:
+            _dirs.append(_o.path.dirname(_o.path.abspath(__file__)))
+        except Exception:
+            pass
+        _dirs.append("/sdcard/Download")
+        _dirs.append("/tmp")
+
+        _txt = []
+        _txt.append("===== DeepSeek语音助手 启动崩溃日志 =====")
+        _txt.append("时间: " + _t.strftime("%Y-%m-%d %H:%M:%S"))
+        try:
+            import platform as _pf
+            _txt.append("平台: " + repr(_pf.platform()))
+        except Exception:
+            pass
+        _txt.append("Python: " + _s.version)
+        _txt.append("argv: " + repr(_s.argv))
+        _txt.append("自动加载模块: " + repr(_s.modules.get("__main__", "?")))
+        _txt.append("")
+        _txt.append("----- 环境变量(节选) -----")
+        for _k in ("ANDROID_PRIVATE", "ANDROID_APP_PATH", "ANDROID_ARGUMENT",
+                   "ANDROID_ROOT", "ANDROID_DATA", "KIVY_NO_ARGS",
+                   "P4A_MINSDK", "P4A_IS_WINDOWED"):
+            _txt.append(f"  {_k} = {_o.environ.get(_k, '(未设置)')}")
+        _txt.append("")
+        _txt.append("----- 异常堆栈 -----")
+        _txt.append(_tb.format_exc())
+        try:
+            _txt.append("")
+            _txt.append("----- 已加载模块 -----")
+            _txt.append(", ".join(sorted([m for m in list(_s.modules.keys())
+                                          if m and not m.startswith('_')])[:200]))
+        except Exception:
+            pass
+        _body = "\n".join(_txt)
+
+        for _d in _dirs:
+            try:
+                if not _d:
+                    continue
+                _o.makedirs(_d, exist_ok=True)
+                _fp = _o.path.join(_d, "启动崩溃日志.txt")
+                with open(_fp, "w", encoding="utf-8") as _f:
+                    _f.write(_body)
+                try:
+                    print("DSV_CRASHLOG_WRITTEN_TO", _fp, flush=True)
+                except Exception:
+                    pass
+            except Exception:
+                continue
+    except Exception:
+        pass
+    try:
+        print("DSV_EARLY_CRASH", flush=True)
+        _tb.print_exc()
+    except Exception:
+        pass
+
+
+try:
+    _dsv_early_crashlog()
+except Exception:
+    pass
+
+
+def _dsv_write_stage_log(stage, extra=""):
+    """把启动阶段写到文件，便于定位卡在哪一步。"""
+    import os as _o, time as _t
+    try:
+        _dirs = []
+        for _env in ("ANDROID_PRIVATE", "ANDROID_APP_PATH"):
+            _p = _o.environ.get(_env)
+            if _p:
+                _dirs.append(_p)
+        _dirs.append("/sdcard/Download")
+        _dirs.append("/tmp")
+        _line = f"[{_t.strftime('%H:%M:%S')}] {stage} {extra}\n"
+        for _d in _dirs:
+            try:
+                if not _d:
+                    continue
+                _o.makedirs(_d, exist_ok=True)
+                with open(_o.path.join(_d, "启动阶段.txt"), "a",
+                          encoding="utf-8") as _f:
+                    _f.write(_line)
+                break
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+
+# 全局异常钩子：任何未被捕获的异常都写进文件（覆盖启动全程）
+def _dsv_global_hook(exc_type, exc_value, exc_tb):
+    try:
+        import traceback as _tb, os as _o, time as _t
+        _body = "".join(_tb.format_exception(exc_type, exc_value, exc_tb))
+        for _env in ("ANDROID_PRIVATE", "ANDROID_APP_PATH", "/sdcard/Download", "/tmp"):
+            _d = _o.environ.get(_env, _env) if _env.startswith("ANDROID") else _env
+            try:
+                if not _d:
+                    continue
+                _o.makedirs(_d, exist_ok=True)
+                with open(_o.path.join(_d, "全局异常.txt"), "w",
+                          encoding="utf-8") as _f:
+                    _f.write(f"时间: {_t.strftime('%Y-%m-%d %H:%M:%S')}\n\n{_body}")
+                break
+            except Exception:
+                continue
+    except Exception:
+        pass
+    try:
+        import sys as _s
+        _s.__excepthook__(exc_type, exc_value, exc_tb)
+    except Exception:
+        pass
+
+
+try:
+    import sys as _sys0
+    _sys0.excepthook = _dsv_global_hook
+except Exception:
+    pass
+
+_dsv_write_stage_log("A01", "main.py 开始执行")
+
 import json
 import os
 import re
@@ -22,12 +162,16 @@ import html as _html
 import base64
 import urllib.error
 
+_dsv_write_stage_log("A02", "标准库导入完成，准备导入 Kivy")
+
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.text import LabelBase
 from kivy.core.window import Window
 from kivy.graphics import (Color, Ellipse, Line, Rectangle, RoundedRectangle)
 from kivy.graphics.texture import Texture
+
+_dsv_write_stage_log("A03", "Kivy 导入成功")
 from kivy.metrics import dp
 from kivy.animation import Animation
 from kivy.uix.boxlayout import BoxLayout
@@ -3602,6 +3746,7 @@ class DeepSeekVoiceApp(App):
     title = "DeepSeek 语音助手"
 
     def build(self):
+        _dsv_write_stage_log("B01", "build() 开始")
         Window.clearcolor = BG_2
         # 【关键修复】安卓上 SDL2 窗口由系统管理，赋值 Window.size 会导致
         # 启动即崩溃（窗口 resize 请求系统不支持）。仅桌面环境设置。
@@ -3611,9 +3756,11 @@ class DeepSeekVoiceApp(App):
             except Exception:
                 pass
         self.cfg = load_json(CONFIG_FILE, DEFAULT_CONFIG)
+        _dsv_write_stage_log("B02", f"配置加载完成 DATA_DIR={DATA_DIR}")
         if not os.path.exists(CONFIG_FILE):
             save_json(CONFIG_FILE, self.cfg)
         self.personas = load_json(PERSONA_FILE, DEFAULT_PERSONAS)
+        _dsv_write_stage_log("B03", f"人设加载完成 {len(self.personas)} 个")
         self.current_persona = self.cfg.get("persona", "龙族三人格")
         if self.current_persona not in self.personas:
             self.current_persona = list(self.personas.keys())[0]
@@ -3628,13 +3775,17 @@ class DeepSeekVoiceApp(App):
         layout = BoxLayout(orientation="vertical")
         root.add_widget(layout)
 
+        _dsv_write_stage_log("B04", "准备构建 TopBar")
         self.topbar = TopBar(self)
         layout.add_widget(self.topbar)
+        _dsv_write_stage_log("B05", "TopBar 完成")
 
         main_row = BoxLayout(orientation="horizontal", spacing=dp(4))
         self.avatar = AvatarCard(self)
+        _dsv_write_stage_log("B06", "AvatarCard 完成")
         main_row.add_widget(self.avatar)
         self.chat = ChatArea(self)
+        _dsv_write_stage_log("B07", "ChatArea 完成")
         main_row.add_widget(self.chat)
         layout.add_widget(main_row)
 
@@ -3646,11 +3797,14 @@ class DeepSeekVoiceApp(App):
 
         self.inputbar = InputBar(self)
         layout.add_widget(self.inputbar)
+        _dsv_write_stage_log("B08", "InputBar 完成，准备初始化会话")
 
         self._init_sessions()
         self._load_messages_into_chat()
         self.chat.check_guide()
+        _dsv_write_stage_log("B09", "会话/消息初始化完成")
         self._handle_args()
+        _dsv_write_stage_log("B10", "build() 全部完成，界面已就绪")
         return root
 
     # ---------- 命令行辅助（截图用；未知参数会被 Kivy 拦截，故用环境变量开关） ----------
@@ -4483,8 +4637,11 @@ def _install_exception_handler():
 
 
 def main():
+    _dsv_write_stage_log("M01", "进入 main()，准备启动 App")
     _install_exception_handler()
+    _dsv_write_stage_log("M02", "异常处理器已装载，开始 run()")
     DeepSeekVoiceApp().run()
+    _dsv_write_stage_log("M03", "run() 已退出（正常退出）")
 
 
 if __name__ == "__main__":
