@@ -1,270 +1,348 @@
 # -*- coding: utf-8 -*-
 """
-DSV WebProbe v1 —— 浏览器套壳最小验证包
-目的：验证「用手机自带浏览器内核显示界面」这条路能不能在荣耀 Play7T 上跑通。
-不含任何业务功能，只有一个测试页面。
+DeepSeek 语音助手 —— 网页界面版（WebView）
+================================================
+与 Kivy 版的区别：只有「界面」换成了网页，功能全部沿用原实现。
+
+保留（原封不动）：
+  AndroidTTS      安卓原生语音播报
+  WebSearch       联网搜索
+  DeepSeekClient  DeepSeek 流式对话 + Function Calling
+  VisionClient    图片理解
+  ImageGenClient  图片生成
+
+替换：
+  Kivy 界面  ->  Android 原生 WebView + HTML/CSS/JS
 """
 
 import os
 import sys
+import json
+import threading
+import time
 import traceback
 from datetime import datetime
 
 # ============================================================
-# 0. 最早期崩溃日志：在任何危险导入之前先落地
+# 路径 & 早期日志
 # ============================================================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-def _write_everywhere(fname, text):
-    """写到所有可能的位置，不中断。手机文件管理器里能看到的最好。"""
-    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    body = u"[%s]\n%s\n" % (stamp, text)
-    done = []
-    dirs = [
-        "/sdcard/Download",
-        "/storage/emulated/0/Download",
-        "/storage/emulated/0/Documents",
-        "/sdcard",
-        "/storage/emulated/0",
-        "/data/local/tmp",
-    ]
-    for e in ("ANDROID_PRIVATE", "ANDROID_APP_PATH", "ANDROID_ARGUMENT"):
-        p = os.environ.get(e)
+
+def _resolve_data_dir():
+    for env in ("ANDROID_PRIVATE", "ANDROID_APP_PATH", "ANDROID_ARGUMENT"):
+        p = os.environ.get(env)
         if p:
-            dirs.append(p)
-    try:
-        dirs.append(os.path.dirname(os.path.abspath(__file__)))
-    except Exception:
-        pass
-    dirs.append("/tmp")
-
-    for d in dirs:
-        try:
-            if not d:
-                continue
             try:
-                os.makedirs(d, exist_ok=True)
+                if os.path.isdir(p):
+                    return p
             except Exception:
                 pass
-            fp = os.path.join(d, fname)
-            with open(fp, "w", encoding="utf-8") as f:
-                f.write(body)
-            done.append("OK  " + fp)
-        except Exception as ex:
-            done.append("ERR %s : %r" % (d, ex))
-    return done
+    return BASE_DIR
 
 
-def _log(stage, extra=""):
+DATA_DIR = _resolve_data_dir()
+try:
+    os.makedirs(DATA_DIR, exist_ok=True)
+except Exception:
+    DATA_DIR = BASE_DIR
+
+CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
+PERSONA_FILE = os.path.join(DATA_DIR, "personas.json")
+CHAT_FILE = os.path.join(DATA_DIR, "chats.json")
+
+LOG_FILE = os.path.join(DATA_DIR, "网页版_运行日志.txt")
+
+
+def _log(msg):
     try:
-        _write_everywhere("网页探针_启动阶段.txt",
-                          u"当前阶段：%s\n%s" % (stage, extra))
+        line = "[%s] %s\n" % (datetime.now().strftime("%m-%d %H:%M:%S"), msg)
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(line)
     except Exception:
         pass
+    print("[DSV]", msg)
 
 
-try:
-    _log(u"00.脚本开始执行",
-         u"Python=%s\nargv=%r\ncwd=%s" % (sys.version, sys.argv, os.getcwd()))
-except Exception:
-    pass
-
-
-# ============================================================
-# 1. 全局异常钩子 —— 任何崩溃都留证据
-# ============================================================
-
-def _hook(exc_type, exc_value, exc_tb):
-    try:
-        tb = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
-        _write_everywhere("网页探针_崩溃日志.txt", tb)
-        _log(u"99.发生未捕获异常", tb)
-    except Exception:
-        pass
-    sys.__excepthook__(exc_type, exc_value, exc_tb)
-
-
-sys.excepthook = _hook
-_log(u"01.全局异常钩子已挂载")
-
-
-# ============================================================
-# 2. Kivy + WebView 导入
-# ============================================================
-
-_log(u"02.准备导入 Kivy")
-
-try:
-    from kivy.app import App
-    from kivy.uix.widget import Widget
-    _log(u"03.Kivy 导入成功")
-except Exception:
-    _write_everywhere("网页探针_崩溃日志.txt", traceback.format_exc())
-    raise
-
-# WebView 组件（关键）：优先用 kivy 官方的，其次用 android 的
-WEBVIEW_KIND = None
-try:
-    from kivy.uix.webview import WebView
-    WEBVIEW_KIND = "kivy.uix.webview"
-    _log(u"04.WebView 导入成功", WEBVIEW_KIND)
-except Exception as e1:
-    try:
-        from android.runnable import run_on_ui_thread
-        from jnius import autoclass
-        WEBVIEW_KIND = "jnius+android.webkit.WebView"
-        _log(u"04.WebView 导入成功(jnius)", str(e1))
-    except Exception as e2:
-        _log(u"04.WebView 全部导入失败",
-             u"kivy方式: %r\njnius方式: %r" % (e1, e2))
-
-
-# ============================================================
-# 3. 测试页面 HTML
-# ============================================================
-
-HTML = u"""<!DOCTYPE html>
-<html><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>网页探针</title>
-<style>
- * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
- body { margin:0; padding:0; background:#0f1115; color:#e8eaed;
-        font-family: -apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
- .wrap { padding:22px 18px 40px; }
- h1 { font-size:26px; margin:6px 0 4px; color:#4ea1ff; }
- .sub { font-size:15px; color:#9aa0a6; margin-bottom:22px; }
- .ok { background:#123d1e; border:2px solid #2ecc71; border-radius:14px;
-       padding:18px; font-size:19px; line-height:1.7; margin-bottom:16px; }
- .ok b { color:#2ecc71; font-size:22px; }
- .card { background:#1a1d23; border-radius:14px; padding:16px 18px;
-         margin-bottom:14px; font-size:15px; line-height:1.9; }
- .k { color:#8ab4f8; }
- .v { color:#fdd663; word-break:break-all; }
- button { width:100%; padding:16px; font-size:18px; border:0; border-radius:12px;
-          background:#4ea1ff; color:#fff; font-weight:600; margin-top:8px; }
- button:active { background:#2d7fd3; }
- #out { margin-top:14px; font-size:16px; color:#81c995; min-height:30px;
-        line-height:1.7; }
-</style></head>
-<body><div class="wrap">
-  <h1>手机支持这条路</h1>
-  <div class="sub">DSV WebProbe v1 · 浏览器套壳验证</div>
-
-  <div class="ok">
-    <b>你看到这个页面了</b><br>
-    说明你的手机<br>能用「浏览器套壳」显示界面。
-  </div>
-
-  <div class="card">
-    <div><span class="k">当前时间：</span><span class="v" id="t">读取中…</span></div>
-    <div><span class="k">屏幕宽度：</span><span class="v" id="w">读取中…</span></div>
-    <div><span class="k">浏览器内核：</span><span class="v" id="ua">读取中…</span></div>
-  </div>
-
-  <button onclick="ping()">点我测试交互</button>
-  <div id="out"></div>
-</div>
-<script>
-  document.getElementById('t').textContent = new Date().toLocaleString('zh-CN');
-  document.getElementById('w').textContent = window.innerWidth + ' px';
-  var u = navigator.userAgent;
-  var m = u.match(/Chrome\\/[0-9.]+/);
-  document.getElementById('ua').textContent = m ? m[0] : u.slice(0, 60);
-  function ping() {
-    var o = document.getElementById('out');
-    o.textContent = '按钮生效了 · ' + new Date().toLocaleTimeString('zh-CN');
-  }
-</script>
-</body></html>"""
-
-
-# ============================================================
-# 4. 界面
-# ============================================================
-
-if WEBVIEW_KIND == "kivy.uix.webview":
-    class ProbeRoot(Widget):
-        def __init__(self, **kw):
-            super().__init__(**kw)
-            self.wv = WebView()
-            self.wv.load_html_string(HTML, "")
-            self.add_widget(self.wv)
-            self.bind(size=self._rs, pos=self._rp)
-            _log(u"05.build 完成(kivy webview)")
-
-        def _rs(self, *a):
-            self.wv.size = self.size
-
-        def _rp(self, *a):
-            self.wv.pos = self.pos
-
-else:
-    # jnius 直连 Android WebView
-    class ProbeRoot(Widget):
-        def __init__(self, **kw):
-            super().__init__(**kw)
-            _log(u"05.build 开始(jnius webview)")
-            self._android_create()
-
-        def _android_create(self):
-            try:
-                from android.runnable import run_on_ui_thread
-                from jnius import autoclass
-
-                PythonActivity = autoclass("org.kivy.android.PythonActivity")
-                WebViewCls = autoclass("android.webkit.WebView")
-                LayoutParams = autoclass("android.view.ViewGroup$LayoutParams")
-                activity = PythonActivity.mActivity
-
-                webview = WebViewCls(activity)
-                webview.getSettings().setJavaScriptEnabled(True)
-                webview.getSettings().setDomStorageEnabled(True)
-                webview.setBackgroundColor(0xFF0F1115)
-                webview.loadDataWithBaseURL("", HTML, "text/html", "utf-8", "")
-
-                self._wv = webview
-
-                @run_on_ui_thread
-                def add():
-                    try:
-                        activity.addContentView(webview, LayoutParams(-1, -1))
-                        _log(u"06.WebView 已挂到界面")
-                    except Exception:
-                        _write_everywhere("网页探针_崩溃日志.txt",
-                                          traceback.format_exc())
-                add()
-                _log(u"05.build 完成(jnius webview)")
-            except Exception:
-                _write_everywhere("网页探针_崩溃日志.txt", traceback.format_exc())
-                _log(u"05.build 失败(jnius webview)", traceback.format_exc())
-
-
-class WebProbeApp(App):
-    def build(self):
-        _log(u"07.build() 被调用")
-        self.title = "网页探针"
-        return ProbeRoot()
-
-    def on_start(self):
-        _log(u"08.on_start() 被调用 —— 程序已成功启动！")
+def _log_everywhere(msg):
+    """重要日志同时写到外部可读目录，方便手机上看。"""
+    _log(msg)
+    for d in ("/sdcard/Download", "/storage/emulated/0/Download"):
         try:
-            _write_everywhere(
-                "★程序已启动★.txt",
-                u"恭喜！DSV WebProbe 在你的手机上成功启动了。\n"
-                u"这说明「浏览器套壳」这条路可行。\n"
-                u"时间：%s\n" % datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            with open(os.path.join(d, "网页版_启动日志.txt"),
+                      "w", encoding="utf-8") as f:
+                f.write(msg)
+            break
+        except Exception:
+            continue
+
+
+_log_everywhere("=== 网页版启动 ===")
+
+# ============================================================
+# 默认配置（沿用原实现）
+# ============================================================
+DEFAULT_CONFIG = {
+    "api_key": "",
+    "search_api_key": "",
+    "vision_api_key": "",
+    "image_api_key": "",
+    "voice": "晓晓（女·温柔）",
+    "persona": "龙族三人格",
+    "speak_on_reply": True,
+    "search_enabled": True,
+    "show_avatar": True,
+}
+
+DEFAULT_PERSONAS = {
+    "龙族三人格": "先结论后理由，三句话内说完。不用敬语、感叹号与 emoji。不知道就说不知道，不许编。",
+    "DeepSeek 鲸鱼娘": "蓝色渐变长发、鲸鱼头鳍的傲娇天然呆娘。口语化、简短、偶尔撒娇。被叫胖要立刻反驳。",
+    "简洁助手": "直接回答不寒暄，先结论后理由，默认三句话内说完，不用 emoji。",
+    "自定义": "在这里写你自己的人设。",
+}
+
+VOICES = ["晓晓（女·温柔）", "晓伊（女·活泼）", "晓涵（女·沉稳）",
+          "晓梦（女·自然）", "云希（男·自然）", "云扬（男·稳重）", "云健（男·阳光）"]
+
+
+def load_json(path, default):
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                merged = dict(default)
+                merged.update(data)
+                return merged
         except Exception:
             pass
+    return dict(default)
 
-    def on_stop(self):
-        _log(u"09.on_stop() 被调用 —— 程序正常退出")
+
+def save_json(path, data):
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception:
+        return False
+
+
+# ============================================================
+# 载入抽出的功能类（643 行，原样复用）
+# ============================================================
+_log("载入功能模块…")
+try:
+    sys.path.insert(0, BASE_DIR)
+    from dsv_core import (AndroidTTS, WebSearch, DeepSeekClient,
+                          VisionClient, ImageGenClient)
+    _log("功能模块载入成功")
+except Exception:
+    _log_everywhere("功能模块载入失败:\n" + traceback.format_exc())
+    raise
+
+from bridge import WebUIController
+
+# ============================================================
+# 后端：把功能类接到网页
+# ============================================================
+class WebBackend(object):
+    """网页调用的所有动作都在这里实现。"""
+
+    def __init__(self, ui):
+        self.ui = ui
+        self.cfg = load_json(CONFIG_FILE, DEFAULT_CONFIG)
+        self.personas = load_json(PERSONA_FILE, DEFAULT_PERSONAS)
+        if not os.path.exists(CONFIG_FILE):
+            save_json(CONFIG_FILE, self.cfg)
+
+        # 消息历史
+        self.messages = []
+        self.cancel_event = None
+        self.busy = False
+        self.tts = AndroidTTS(self)
+        _log("后端就绪")
+
+    # ---------- 设置 ----------
+    def get_settings(self):
+        return {
+            "api_key": self.cfg.get("api_key", ""),
+            "search_api_key": self.cfg.get("search_api_key", ""),
+            "vision_api_key": self.cfg.get("vision_api_key", ""),
+            "image_api_key": self.cfg.get("image_api_key", ""),
+            "voice": self.cfg.get("voice", VOICES[0]),
+            "voices": VOICES,
+            "persona": self.cfg.get("persona", "龙族三人格"),
+            "personas": list(self.personas.keys()),
+            "speak_on_reply": bool(self.cfg.get("speak_on_reply", True)),
+            "search_enabled": bool(self.cfg.get("search_enabled", True)),
+            "tts_available": self.tts.available() if self.tts else False,
+        }
+
+    def on_save_settings(self, d):
+        try:
+            for k in ("api_key", "search_api_key", "vision_api_key",
+                      "image_api_key", "voice", "persona"):
+                if k in d and d[k] is not None:
+                    self.cfg[k] = d[k]
+            for k in ("speak_on_reply", "search_enabled", "show_avatar"):
+                if k in d:
+                    self.cfg[k] = bool(d[k])
+            save_json(CONFIG_FILE, self.cfg)
+            _log("设置已保存")
+        except Exception:
+            _log("保存设置出错:\n" + traceback.format_exc())
+
+    def get_conversations(self):
+        try:
+            if os.path.exists(CHAT_FILE):
+                with open(CHAT_FILE, "r", encoding="utf-8") as f:
+                    return json.load(f)
+        except Exception:
+            pass
+        return []
+
+    def on_clear_chat(self):
+        self.messages = []
+        _log("对话已清空")
+
+    # ---------- 发送消息（核心） ----------
+    def on_send(self, text):
+        if self.busy:
+            self.ui.toast("正在回答中，请先打断")
+            return
+        if not text or not text.strip():
+            return
+
+        key = (self.cfg.get("api_key") or "").strip()
+        if not key:
+            self.ui.toast("还没有填 API Key，请到设置里填")
+            self.ui.ai_done({})
+            return
+
+        self.busy = True
+        self.cancel_event = threading.Event()
+
+        persona = self.cfg.get("persona", "龙族三人格")
+        sys_prompt = self.personas.get(persona) or DEFAULT_PERSONAS["简洁助手"]
+
+        self.messages.append({"role": "user", "content": text})
+
+        payload = [{"role": "system", "content": sys_prompt}] + self.messages
+        client = DeepSeekClient(key)
+        search = None
+        if self.cfg.get("search_enabled", True):
+            skey = (self.cfg.get("search_api_key") or "").strip()
+            search = WebSearch(skey)
+
+        acc = []
+
+        def on_delta(t):
+            if not t:
+                return
+            acc.append(t)
+            self.ui.ai_chunk(t)
+
+        def on_status(s):
+            if s == "searching":
+                self.ui.status("busy", "正在搜索…")
+            elif s == "searched":
+                self.ui.status("busy", "思考中…")
+
+        def on_done(full):
+            self.busy = False
+            if full:
+                self.messages.append({"role": "assistant", "content": full})
+            self.ui.ai_done({})
+            self.ui.status("idle", "DeepSeek")
+            # 语音播报
+            if full and self.cfg.get("speak_on_reply", True) and self.tts:
+                try:
+                    self.tts.speak(full)
+                except Exception:
+                    _log("TTS 出错:\n" + traceback.format_exc())
+
+        def on_error(msg):
+            self.busy = False
+            self.ui.ai_chunk(u"[出错] " + str(msg))
+            self.ui.ai_done({})
+            self.ui.status("err", "出错")
+
+        def run():
+            try:
+                client.chat(
+                    payload, on_delta, on_status, on_done, on_error,
+                    web_search=search,
+                    search_enabled=self.cfg.get("search_enabled", True),
+                    cancel_event=self.cancel_event)
+            except Exception:
+                on_error(traceback.format_exc())
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def on_interrupt(self):
+        if self.cancel_event is not None:
+            self.cancel_event.set()
+        if self.tts:
+            try:
+                self.tts.stop()
+            except Exception:
+                pass
+        self.busy = False
+        self.ui.toast("已打断")
+
+    # ---------- 录音（占位，后续接语音识别） ----------
+    def on_start_record(self):
+        self.ui.rec_start()
+        self.ui.toast("录音功能待接入")
+
+    def on_stop_record(self):
+        self.ui.rec_stop()
+
+
+# ============================================================
+# 界面 HTML（读取同目录的 index.html）
+# ============================================================
+def load_ui_html():
+    for p in (os.path.join(BASE_DIR, "index.html"),
+              os.path.join(BASE_DIR, "ui", "index.html")):
+        try:
+            if os.path.isfile(p):
+                with open(p, "r", encoding="utf-8") as f:
+                    return f.read()
+        except Exception:
+            continue
+    return u"<h1>界面文件缺失</h1><p>请把 index.html 放到程序目录。</p>"
+
+
+# ============================================================
+# 启动
+# ============================================================
+def main():
+    _log_everywhere("准备创建 WebView…")
+    try:
+        ui = WebUIController(None)          # backend 稍后注入
+        backend = WebBackend(ui)
+        ui.backend = backend
+
+        def on_ready():
+            _log_everywhere("WebView 已就绪，加载界面")
+            ui.load_html(load_ui_html())
+            time.sleep(0.6)
+            ui.js("onStatus", "idle", "DeepSeek")
+            _log_everywhere("★网页版启动成功★")
+
+        html = load_ui_html()
+        ui.attach(html, on_ready=on_ready)
+
+        # 保持主线程存活
+        while True:
+            time.sleep(1)
+    except Exception:
+        tb = traceback.format_exc()
+        _log_everywhere("启动失败:\n" + tb)
+        raise
 
 
 if __name__ == "__main__":
-    _log(u"10.准备调用 run()")
-    try:
-        WebProbeApp().run()
-    except Exception:
-        _write_everywhere("网页探针_崩溃日志.txt", traceback.format_exc())
-        raise
+    main()
