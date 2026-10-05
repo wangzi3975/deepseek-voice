@@ -181,34 +181,23 @@ class WebUIController(object):
 
     # ---------- 加载 HTML ----------
     def load_html(self, html):
-        """用 data: URL 的等价方式注入：先加载 about:blank，再 document.write。"""
-        b64 = base64.b64encode(html.encode("utf-8")).decode("ascii")
-
+        """
+        用 loadDataWithBaseURL 注入页面内容（最稳，无需外部文件）。
+        基地址用 file:/// 方便未来加载本地图片/字体。
+        """
         def _do():
             try:
-                # 先加载空白页
-                self.webview.loadUrl("about:blank")
-            except Exception:
-                traceback.print_exc()
-
-        self._run_on_ui(_do)
-
-        time.sleep(0.5)
-
-        # 再把内容写进去（用 loadDataWithBaseURL，最稳）
-        def _write():
-            try:
                 self.webview.loadDataWithBaseURL(
-                    "file:///android_asset/",   # 伪基地址
+                    "file:///android_asset/",
                     html,
                     "text/html",
                     "utf-8",
                     None)
-                print("[bridge] HTML 已注入")
+                print("[bridge] HTML 已注入 (%d 字符)" % len(html))
             except Exception:
                 traceback.print_exc()
 
-        self._run_on_ui(_write)
+        self._run_on_ui(_do)
 
     # ---------- Python -> JS ----------
     def eval_js(self, code):
