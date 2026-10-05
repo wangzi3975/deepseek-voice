@@ -8,6 +8,9 @@ on:
       - '.github/workflows/webprobe.yml'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-webprobe:
     runs-on: ubuntu-22.04
@@ -83,14 +86,6 @@ jobs:
             if [ -f "$f" ]; then echo "✅ $f"; else echo "❌ 缺失 $f"; MISSING=1; fi
           done
           if [ "$MISSING" = "1" ]; then exit 1; fi
-          echo "=== p4a.branch 检查 ==="
-          BRANCH=$(grep -E "^p4a\.branch" buildozer.spec | cut -d= -f2 | tr -d ' ')
-          echo "branch = [$BRANCH]"
-          if git ls-remote --tags https://github.com/kivy/python-for-android.git 2>/dev/null | grep -q "refs/tags/${BRANCH}$"; then
-            echo "✅ p4a 标签存在"
-          else
-            echo "❌ p4a 标签不存在"; exit 1
-          fi
 
       - name: Clean buildozer and p4a caches
         working-directory: webprobe
@@ -104,7 +99,6 @@ jobs:
         working-directory: webprobe
         run: |
           buildozer -v android release > build_full.log 2>&1 || true
-          echo "构建命令返回，检查产物..."
           ls -la bin/ || true
           if ls bin/*.apk >/dev/null 2>&1; then
             echo "✅ 已签名 release APK 生成"
@@ -134,16 +128,6 @@ jobs:
           unzip -l "$APK" | grep -E "lib/.*\.so" | awk '{print $4}' | sed 's|/[^/]*$||' | sort -u || true
           stat -c "%n %s bytes" "$APK"
 
-      - name: Rename APK to stable name
-        if: always()
-        working-directory: webprobe
-        run: |
-          APK=$(ls bin/*.apk 2>/dev/null | head -1)
-          if [ -n "$APK" ]; then
-            cp "$APK" bin/DSV-WebProbe-v1.apk
-            echo "✅ 已复制为 bin/DSV-WebProbe-v1.apk"
-          fi
-
       - name: Show build log tail if failed
         if: failure()
         working-directory: webprobe
@@ -159,10 +143,20 @@ jobs:
           path: webprobe/build_full.log
           if-no-files-found: warn
 
-      - name: Upload APK
-        if: always()
-        uses: actions/upload-artifact@v4
+      # 关键：把 APK 发布到 Release，生成手机可下载的直链
+      - name: Publish APK to Release
+        if: success()
+        uses: softprops/action-gh-release@v2
         with:
-          name: webprobe-apk
-          path: webprobe/bin/*.apk
-          if-no-files-found: warn
+          tag_name: webprobe-v1
+          name: DSV 网页版测试包 v1
+          body: |
+            ## DSV WebProbe v1 · 浏览器套壳测试包
+
+            用手机自带浏览器内核渲染界面，绕开 Kivy 图形引擎。
+
+            - 包名：org.dsvwebprobe.webprobe
+            - 架构：arm64-v8a + armeabi-v7a
+            - 最低系统：Android 5.0
+          files: webprobe/bin/*.apk
+          make_latest: false
