@@ -15,8 +15,8 @@ orientation = landscape, portrait, landscape-reverse, portrait-reverse
 fullscreen = 0
 icon.filename = %(source.dir)s/icon/app_icon.png
 
-# 老的 p4a 分支，配 Python 3.11 与 Kivy 2.1.0
-p4a.branch = v2022.09.21
+# 老的 p4a 分支，配 Kivy 2.1.0
+p4a.branch = v2022.12.20
 
 android.permissions = INTERNET,ACCESS_NETWORK_STATE,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
 android.minapi = 21
