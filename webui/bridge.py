@@ -198,6 +198,24 @@ class WebUIController(object):
                 traceback.print_exc()
 
         self._run_on_ui(_do)
+        # 页面渲染需要一点时间；随后告诉网页"桥接是通的"，
+        # 避免网页误判成电脑浏览器预览而降级为模拟回复
+        self._arm_bridge_hello()
+
+    def _arm_bridge_hello(self):
+        """注入后分几次尝试通知网页，确保脚本已执行"""
+        def _worker():
+            time.sleep(1.2)
+            for i in range(6):
+                try:
+                    self.eval_js(
+                        "if(window.__bridgeAlive__){window.__bridgeAlive__();}")
+                    print("[bridge] 已通知网页桥接就绪 (第 %d 次)" % (i + 1))
+                except Exception:
+                    traceback.print_exc()
+                time.sleep(1.0)
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     # ---------- Python -> JS ----------
     def eval_js(self, code):
