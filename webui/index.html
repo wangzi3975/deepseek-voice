@@ -153,6 +153,15 @@ input,textarea{-webkit-user-select:text;user-select:text;}
 .sec{font-size:13px;color:var(--fg3);margin:22px 0 8px 2px;
   text-transform:uppercase;letter-spacing:.5px;}
 
+/* 对话记录列表项 */
+.crow{display:flex;align-items:center;justify-content:space-between;
+  padding:15px 14px;background:var(--bg2);border:1px solid var(--line);
+  border-radius:12px;margin-bottom:10px;cursor:pointer;}
+.crow:active{background:var(--bg3);}
+.crow .ct{font-size:15.5px;color:var(--fg);overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap;flex:1;}
+.crow .cs{font-size:12.5px;color:var(--fg3);margin-left:12px;flex:0 0 auto;}
+
 /* ---------- 提示条 ---------- */
 #toast{position:fixed;left:50%;bottom:84px;
   transform:translateX(-50%);background:#2a2f3a;color:var(--fg);
@@ -437,8 +446,19 @@ function openPanel(kind){
   var t = document.getElementById('pTitle');
   var b = document.getElementById('pBody');
   p.classList.add('on');
-  if (kind === 'settings'){ t.textContent = '设置'; b.innerHTML = settingsHTML(); }
-  else if (kind === 'conversations'){ t.textContent='对话记录'; b.innerHTML = convHTML(); }
+  if (kind === 'settings'){
+    t.textContent = '设置';
+    b.innerHTML = settingsHTML();
+    // 用缓存的配置回填（Python 可能早就推过了）
+    if (window.__cfg__) fillSettings(window.__cfg__);
+    // 顺便再问一次后端，保证是最新值
+    callPython('get_settings', {});
+  }
+  else if (kind === 'conversations'){
+    t.textContent = '对话记录';
+    b.innerHTML = convHTML();
+    callPython('get_conversations', {});
+  }
   callPython('panel_open', {kind: kind});
 }
 function closePanel(){
@@ -451,30 +471,102 @@ function settingsHTML(){
   + '<div class="sec">API 配置</div>'
   + '<div class="field"><label>DeepSeek API Key</label>'
   +   '<input type="password" id="sKey" placeholder="sk-..."></div>'
-  + '<div class="field"><label>模型</label>'
-  +   '<select id="sModel">'
-  +   '<option value="deepseek-chat">deepseek-chat</option>'
-  +   '<option value="deepseek-reasoner">deepseek-reasoner</option>'
-  +   '</select></div>'
-  + '<div class="sec">功能开关</div>'
+  + '<div class="field"><label>联网搜索 API Key（选填）</label>'
+  +   '<input type="password" id="sSearchKey" placeholder="不填则用内置兜底"></div>'
+  + '<div class="field"><label>图片理解 API Key（选填）</label>'
+  +   '<input type="password" id="sVisionKey" placeholder="不填则用 DeepSeek Key"></div>'
+  + '<div class="field"><label>图片生成 API Key（选填）</label>'
+  +   '<input type="password" id="sImageKey" placeholder="不填则用 DeepSeek Key"></div>'
+  + '<div class="sec">人设</div>'
+  + '<div class="field"><label>当前人设</label>'
+  +   '<select id="sPersona"></select></div>'
+  + '<div class="sec">语音</div>'
+  + '<div class="field"><label>播报音色</label>'
+  +   '<select id="sVoice"></select></div>'
   + '<div class="row"><div><div class="lb">语音播报</div>'
   +   '<div class="ds">AI 回复自动朗读</div></div>'
   +   '<div class="sw" id="sTTS"></div></div>'
+  + '<div class="sec">功能</div>'
   + '<div class="row"><div><div class="lb">联网搜索</div>'
   +   '<div class="ds">允许 AI 联网查资料</div></div>'
   +   '<div class="sw" id="sWeb"></div></div>'
-  + '<div class="row"><div><div class="lb">流式输出</div>'
-  +   '<div class="ds">逐字显示回复</div></div>'
-  +   '<div class="sw on" id="sStream"></div></div>'
   + '<div class="sec">其他</div>'
   + '<button class="btn" id="sSave">保存设置</button>'
   + '<button class="btn ghost" id="sClear">清空当前对话</button>';
 }
 
+/* 后端配置到达后：缓存 + 若面板已开则立即回填 */
+window.__cfg__ = window.__cfg__ || null;
+
+function fillSettings(cfg){
+  try{
+    cfg = cfg || {};
+    var g = function(id){ return document.getElementById(id); };
+    if (g('sKey'))       g('sKey').value       = cfg.api_key || '';
+    if (g('sSearchKey')) g('sSearchKey').value = cfg.search_api_key || '';
+    if (g('sVisionKey')) g('sVisionKey').value = cfg.vision_api_key || '';
+    if (g('sImageKey'))  g('sImageKey').value  = cfg.image_api_key || '';
+
+    var ps = g('sPersona');
+    if (ps && cfg.personas){
+      ps.innerHTML = cfg.personas.map(function(n){
+        return '<option value="' + n + '">' + n + '</option>'; }).join('');
+      ps.value = cfg.persona || '';
+    }
+    var vs = g('sVoice');
+    if (vs && cfg.voices){
+      vs.innerHTML = cfg.voices.map(function(n){
+        return '<option value="' + n + '">' + n + '</option>'; }).join('');
+      vs.value = cfg.voice || '';
+    }
+    var t = g('sTTS');
+    if (t) t.classList.toggle('on', !!cfg.speak_on_reply);
+    var w = g('sWeb');
+    if (w) w.classList.toggle('on', !!cfg.search_enabled);
+    return true;
+  }catch(e){ console.log('fillSettings err', e); return false; }
+}
+
+window.onSettings = function(cfg){
+  window.__cfg__ = cfg || {};
+  // 面板没打开时，DOM 里没有这些字段，先只缓存，等 openPanel 再填
+  if (document.getElementById('sKey')) fillSettings(window.__cfg__);
+
+  // 没填 Key 时，自动弹出设置面板提示
+  if (!window.__cfg__.api_key && !window.__warnedKey__){
+    window.__warnedKey__ = true;
+    setTimeout(function(){ openPanel('settings'); }, 200);
+    toast('先填上 API Key 才能开始对话');
+  }
+};
+
 function convHTML(){
   return '<div id="convList"><div class="empty" style="text-align:center;'
     + 'color:#6b7280;padding:40px">加载中…</div></div>';
 }
+
+window.onConversations = function(list){
+  try{
+    var box = document.getElementById('convList');
+    if (!box) return;
+    if (!list || !list.length){
+      box.innerHTML = '<div class="empty" style="text-align:center;'
+        + 'color:#6b7280;padding:40px">还没有对话记录</div>';
+      return;
+    }
+    var h = '';
+    for (var i = 0; i < list.length; i++){
+      var c = list[i] || {};
+      var title = c.title || c.name || ('对话 ' + (i + 1));
+      var cnt = (c.messages && c.messages.length) ? c.messages.length + ' 条' : '';
+      h += '<div class="crow" data-i="' + i + '">'
+         +   '<div class="ct">' + title + '</div>'
+         +   '<div class="cs">' + cnt + '</div>'
+         + '</div>';
+    }
+    box.innerHTML = h;
+  }catch(e){ console.log('onConversations err', e); }
+};
 
 /* 设置面板交互（面板打开后再绑定） */
 document.addEventListener('click', function(e){
@@ -482,11 +574,14 @@ document.addEventListener('click', function(e){
   if (sw) sw.classList.toggle('on');
   if (e.target.id === 'sSave'){
     var v = {
-      api_key: (document.getElementById('sKey')||{}).value || '',
-      model:   (document.getElementById('sModel')||{}).value || '',
-      tts:     document.getElementById('sTTS').classList.contains('on'),
-      web:     document.getElementById('sWeb').classList.contains('on'),
-      stream:  document.getElementById('sStream').classList.contains('on')
+      api_key:       (document.getElementById('sKey')       || {}).value || '',
+      search_api_key:(document.getElementById('sSearchKey') || {}).value || '',
+      vision_api_key:(document.getElementById('sVisionKey') || {}).value || '',
+      image_api_key: (document.getElementById('sImageKey')  || {}).value || '',
+      persona:       (document.getElementById('sPersona')   || {}).value || '',
+      voice:         (document.getElementById('sVoice')     || {}).value || '',
+      speak_on_reply: document.getElementById('sTTS').classList.contains('on'),
+      search_enabled: document.getElementById('sWeb').classList.contains('on')
     };
     callPython('save_settings', v);
     toast('设置已保存');
@@ -497,6 +592,8 @@ document.addEventListener('click', function(e){
     callPython('clear_chat', {});
     closePanel();
   }
+  var cr = e.target.closest('.crow');
+  if (cr){ toast('历史对话功能待接入'); }
 });
 
 function applyTheme(cfg){ /* 预留 */ }
