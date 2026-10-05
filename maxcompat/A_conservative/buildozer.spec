@@ -9,7 +9,7 @@ version = 0.5a
 
 # 【保守版 A】用最老最稳的组合，最大化兼容性
 # Kivy 2.1.0 = 2021 年稳定版，对国产芯片兼容性远好于 2.3.x
-requirements = python3,kivy==2.1.0,requests,pyjnius,android,urllib3,certifi,chardet,idna,plyer,pillow
+requirements = python3,kivy==2.3.1,requests,pyjnius,android,urllib3,certifi,chardet,idna,plyer,pillow
 
 orientation = landscape, portrait, landscape-reverse, portrait-reverse
 fullscreen = 0
