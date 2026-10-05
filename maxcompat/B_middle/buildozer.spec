@@ -9,7 +9,7 @@ version = 0.5b
 
 # 【折中版 B】Kivy 2.2.1 + p4a v2023.09.15
 # 比 A 新一点，比当前 2.3.1 老一点，中间路线
-requirements = python3,kivy==2.2.1,requests,pyjnius,android,urllib3,certifi,chardet,idna,plyer,pillow
+requirements = python3,kivy==2.3.1,requests,pyjnius,android,urllib3,certifi,chardet,idna,plyer,pillow
 
 orientation = landscape, portrait, landscape-reverse, portrait-reverse
 fullscreen = 0
