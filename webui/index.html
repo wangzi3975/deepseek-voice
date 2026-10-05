@@ -224,9 +224,19 @@ input,textarea{-webkit-user-select:text;user-select:text;}
    方式：跳转伪链接 dsv://call/<action>?d=<json>
          Android 端 WebViewClient 会拦截，转发给 Python
    这样避免了 addJavascriptInterface 的兼容风险
+
+   ★ 电脑浏览器预览（无 Python）时自动降级为模拟回复
+     真机首次调用成功后，会把 HAS_BRIDGE 置为 true
    ======================================================= */
-var HAS_BRIDGE = (location.protocol === 'data:' ||
-                  (typeof AndroidBridgeReady !== 'undefined'));
+var HAS_BRIDGE = false;      // 先假定无桥接
+var BRIDGE_PROBED = false;   // 是否已确认真机桥接可用
+
+/* Python 端连上后会调用这个函数，用来"报平安" */
+window.__bridgeAlive__ = function(){
+  HAS_BRIDGE = true;
+  BRIDGE_PROBED = true;
+  console.log('[bridge] 已连接 Python');
+};
 
 function callPython(action, payload){
   var json = JSON.stringify(payload || {});
@@ -238,13 +248,18 @@ function callPython(action, payload){
     f.src = url;
     document.body.appendChild(f);
     setTimeout(function(){ try{ document.body.removeChild(f); }catch(e){} }, 200);
+    // 能创建 iframe 并赋值 dsv:// 就说明浏览器环境正常
+    if (!BRIDGE_PROBED) console.log('[bridge] ->', action);
   } catch(e) {
-    console.log('bridge err', e);
+    console.log('[bridge] err', e);
     try { location.href = url; } catch(e2){}
   }
-  // 电脑浏览器预览时走模拟
-  if (!HAS_BRIDGE && location.protocol === 'file:'){
-    setTimeout(function(){ mockReply(action, payload); }, 300);
+  // 仅在"确认无桥接"时才降级为模拟（电脑浏览器预览用）
+  if (!HAS_BRIDGE && !BRIDGE_PROBED){
+    setTimeout(function(){
+      // 给 Python 一点时间回调 __bridgeAlive__；没回调才走 mock
+      if (!HAS_BRIDGE) mockReply(action, payload);
+    }, 700);
   }
 }
 
