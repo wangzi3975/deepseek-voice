@@ -9,7 +9,9 @@ version = 0.4
 
 requirements = python3,kivy==2.3.1,requests,pyjnius,android,urllib3,certifi,chardet,idna,plyer,pillow
 
-orientation = portrait
+# 横竖屏双模式：all 会展开为 landscape / portrait / landscape-reverse /
+# portrait-reverse，即四种方向全部支持，跟随手机旋转自动切换。
+orientation = all
 fullscreen = 0
 icon.filename = %(source.dir)s/icon/app_icon.png
 
