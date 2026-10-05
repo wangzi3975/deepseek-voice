@@ -1,0 +1,105 @@
+name: Build MaxCompat Variants
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'maxcompat/**'
+      - '.github/workflows/maxcompat.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [A_conservative, B_middle, C_pure32]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y git zip unzip autoconf automake libtool \
+            pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev \
+            libtinfo6 cmake libffi-dev libssl-dev gettext libltdl-dev
+
+      - name: Setup Buildozer and Cython
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install "cython==3.0.11" buildozer
+
+      - name: Clean conflicting Android env vars
+        run: |
+          echo "ANDROID_HOME=" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=" >> $GITHUB_ENV
+
+      - name: Pre-install Android SDK cmdline-tools
+        run: |
+          set -e
+          SDK_ROOT="$HOME/.buildozer/android/platform/android-sdk"
+          mkdir -p "$SDK_ROOT/cmdline-tools"
+          cd /tmp
+          curl -sSL -o cmdtools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q cmdtools.zip -d /tmp/cmdtools
+          rm -rf "$SDK_ROOT/cmdline-tools/latest"
+          mv /tmp/cmdtools/cmdline-tools "$SDK_ROOT/cmdline-tools/latest"
+          mkdir -p "$SDK_ROOT/tools/bin"
+          ln -sf "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "$SDK_ROOT/tools/bin/sdkmanager"
+          ln -sf "$SDK_ROOT/cmdline-tools/latest/bin/avdmanager" "$SDK_ROOT/tools/bin/avdmanager"
+          chmod +x "$SDK_ROOT/cmdline-tools/latest/bin/"* || true
+          yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+
+      - name: Generate release keystore + export signing env
+        run: |
+          keytool -genkeypair -v -keystore "$RUNNER_TEMP/release.keystore" \
+            -alias deepseek -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass deepseek2024 -keypass deepseek2024 \
+            -dname "CN=DeepSeekVoice, OU=Dev, O=Personal, L=City, ST=State, C=CN"
+          echo "P4A_RELEASE_KEYSTORE=$RUNNER_TEMP/release.keystore" >> $GITHUB_ENV
+          echo "P4A_RELEASE_KEYSTORE_PASSWD=deepseek2024" >> $GITHUB_ENV
+          echo "P4A_RELEASE_KEYALIAS=deepseek" >> $GITHUB_ENV
+          echo "P4A_RELEASE_KEYALIAS_PASSWD=deepseek2024" >> $GITHUB_ENV
+
+      - name: Build ${{ matrix.variant }}
+        working-directory: maxcompat/${{ matrix.variant }}
+        run: |
+          buildozer -v android release > build_full.log 2>&1 || true
+          ls -la bin/ || true
+          if ls bin/*.apk >/dev/null 2>&1; then
+            echo "✅ release APK 生成"
+          else
+            echo "⚠️ release 未产出，回退 debug"
+            buildozer -v android debug >> build_full.log 2>&1 || true
+            ls -la bin/ || true
+          fi
+          if ls bin/*.apk >/dev/null 2>&1; then echo "✅ OK"; else echo "❌ 无 APK"; fi
+
+      - name: Show log tail if failed
+        if: always()
+        working-directory: maxcompat/${{ matrix.variant }}
+        run: |
+          echo "===== ${{ matrix.variant }} 日志尾部 ====="
+          tail -60 build_full.log || true
+
+      - name: Upload APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ matrix.variant }}
+          path: maxcompat/${{ matrix.variant }}/bin/*.apk
+          if-no-files-found: warn
