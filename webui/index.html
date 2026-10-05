@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>DeepSeek 语音助手</title>
+<style>
+:root{
+  --bg:#0f1115; --bg2:#161a21; --bg3:#1e222b;
+  --fg:#e8eaed; --fg2:#9aa0a6; --fg3:#6b7280;
+  --accent:#4ea1ff; --accent2:#2d7fd3;
+  --user:#2d5a8e; --ai:#1e222b;
+  --line:#2a2f3a; --ok:#2ecc71; --warn:#fdd663; --err:#f28b82;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;
+  -webkit-user-select:none;user-select:none;}
+html,body{margin:0;padding:0;height:100%;overflow:hidden;
+  background:var(--bg);color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+  font-size:16px;line-height:1.6;}
+input,textarea{-webkit-user-select:text;user-select:text;}
+
+/* ---------- 顶部栏 ---------- */
+#top{position:fixed;top:0;left:0;right:0;height:54px;
+  background:var(--bg2);border-bottom:1px solid var(--line);
+  z-index:100;display:block;overflow:hidden;}
+#top .title{position:absolute;left:12px;right:96px;top:0;height:54px;
+  font-size:17px;font-weight:600;color:var(--fg);
+  display:flex;align-items:center;gap:8px;overflow:hidden;}
+#top .title span:last-child{overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;}
+#top .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);
+  box-shadow:0 0 6px var(--ok);}
+#top .dot.busy{background:var(--warn);box-shadow:0 0 6px var(--warn);
+  animation:blink 1s infinite;}
+#top .dot.err{background:var(--err);box-shadow:0 0 6px var(--err);}
+@keyframes blink{50%{opacity:.3;}}
+#top .ibtn{position:absolute;top:7px;width:40px;height:40px;
+  border-radius:10px;border:0;background:transparent;
+  color:#b8bec8;display:flex;align-items:center;
+  justify-content:center;cursor:pointer;padding:0;}
+#top .ibtn svg{display:block;}
+#top .ibtn:active{background:var(--bg3);}
+#bConv{right:56px;}
+#bSet{right:10px;}
+
+/* ---------- 聊天区 ---------- */
+#chat{position:fixed;top:54px;bottom:62px;
+  left:0;right:0;overflow-y:auto;overflow-x:hidden;
+  padding:14px 12px 8px;-webkit-overflow-scrolling:touch;}
+#chat .empty{text-align:center;color:var(--fg3);padding:60px 20px;font-size:15px;}
+
+.msg{display:flex;margin-bottom:14px;animation:fadein .22s ease;}
+@keyframes fadein{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}
+.msg.me{justify-content:flex-end;}
+.bub{max-width:82%;padding:11px 15px;border-radius:16px;font-size:15.5px;
+  line-height:1.65;word-break:break-word;white-space:pre-wrap;
+  -webkit-user-select:text;user-select:text;}
+.msg.me .bub{background:var(--user);border-bottom-right-radius:5px;}
+.msg.ai .bub{background:var(--ai);border:1px solid var(--line);
+  border-bottom-left-radius:5px;}
+.bub img{max-width:100%;border-radius:10px;display:block;margin-top:6px;}
+.bub code{background:#0a0c10;padding:2px 5px;border-radius:4px;
+  font-family:ui-monospace,Menlo,monospace;font-size:14px;}
+.bub pre{background:#0a0c10;padding:10px;border-radius:8px;overflow-x:auto;
+  margin:8px 0;font-size:13.5px;}
+.msg .meta{font-size:11.5px;color:var(--fg3);margin:0 6px 3px;
+  align-self:flex-end;}
+
+/* 打字动画 */
+.typing{display:flex;gap:4px;padding:4px 0;align-items:center;height:20px;}
+.typing i{width:7px;height:7px;border-radius:50%;background:var(--fg3);
+  animation:bounce 1.3s infinite;}
+.typing i:nth-child(2){animation-delay:.18s;}
+.typing i:nth-child(3){animation-delay:.36s;}
+@keyframes bounce{0%,60%,100%{transform:translateY(0);opacity:.4;}
+  30%{transform:translateY(-6px);opacity:1;}}
+
+/* ---------- 底部输入栏 ---------- */
+#bar{position:fixed;bottom:0;left:0;right:0;height:62px;
+  padding:8px 10px;background:var(--bg2);
+  border-top:1px solid var(--line);z-index:100;
+  display:flex;gap:8px;align-items:center;overflow:hidden;}
+#inp{flex:1 1 auto;min-width:0;background:var(--bg3);
+  border:1px solid var(--line);border-radius:20px;
+  color:var(--fg);font-size:16px;padding:10px 15px;max-height:110px;
+  min-height:42px;resize:none;outline:none;font-family:inherit;
+  line-height:1.45;overflow-y:auto;}
+#inp::placeholder{color:var(--fg3);}
+#inp:focus{border-color:var(--accent);}
+.rbtn{width:46px;height:46px;min-width:46px;flex:0 0 46px;border-radius:50%;
+  border:0;display:flex;align-items:center;justify-content:center;
+  font-size:20px;cursor:pointer;padding:0;
+  transition:background .15s,opacity .15s;}
+.rbtn svg{display:block;}
+#mic{background:var(--bg3);color:var(--fg2);}
+#mic.rec{background:var(--err);color:#fff;animation:pulse 1.2s infinite;}
+@keyframes pulse{50%{opacity:.55;}}
+#send{background:var(--accent);color:#fff;}
+#send:active{background:var(--accent2);}
+#send.gen{background:var(--bg3);color:var(--fg3);font-size:15px;}
+
+/* ---------- 锁定遮罩 ---------- */
+#lock{position:fixed;inset:0;background:rgba(15,17,21,.88);
+  display:none;align-items:center;justify-content:center;z-index:300;
+  flex-direction:column;gap:16px;}
+#lock.on{display:flex;}
+#lock .txt{color:var(--fg2);font-size:15px;}
+.spin{width:34px;height:34px;border:3px solid var(--line);
+  border-top-color:var(--accent);border-radius:50%;
+  animation:spin .9s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+
+/* ---------- 通用弹窗 ---------- */
+#panel{position:fixed;inset:0;background:var(--bg);z-index:200;
+  display:none;flex-direction:column;}
+#panel.on{display:flex;}
+#panel .ph{height:54px;
+  background:var(--bg2);border-bottom:1px solid var(--line);
+  display:flex;align-items:center;padding-left:6px;padding-right:12px;flex:0 0 auto;}
+#panel .ph b{flex:1;font-size:17px;margin-left:6px;}
+#panel .pb{flex:1;overflow-y:auto;padding:16px 14px 40px;}
+
+.field{margin-bottom:18px;}
+.field label{display:block;font-size:14px;color:var(--fg2);margin-bottom:7px;}
+.field input[type=text],.field input[type=password],.field input[type=number],
+.field textarea,.field select{
+  width:100%;background:var(--bg3);border:1px solid var(--line);border-radius:11px;
+  color:var(--fg);font-size:15.5px;padding:12px 14px;outline:none;
+  font-family:inherit;-webkit-user-select:text;user-select:text;}
+.field textarea{min-height:90px;resize:vertical;line-height:1.55;}
+.field input:focus,.field textarea:focus,.field select:focus{
+  border-color:var(--accent);}
+
+.btn{width:100%;padding:14px;border:0;border-radius:12px;font-size:16.5px;
+  font-weight:600;background:var(--accent);color:#fff;cursor:pointer;
+  font-family:inherit;}
+.btn:active{background:var(--accent2);}
+.btn.ghost{background:var(--bg3);color:var(--fg);}
+.btn.danger{background:#5c2b2b;color:#ffb4b4;}
+.btn+.btn{margin-top:10px;}
+
+.row{display:flex;align-items:center;justify-content:space-between;
+  padding:14px 2px;border-bottom:1px solid var(--line);}
+.row .lb{font-size:15.5px;}
+.row .ds{font-size:12.5px;color:var(--fg3);margin-top:3px;}
+.sw{width:50px;height:29px;min-width:50px;border-radius:15px;background:var(--bg3);
+  border:1px solid var(--line);position:relative;transition:background .2s;cursor:pointer;}
+.sw::after{content:'';position:absolute;top:2px;left:2px;width:23px;height:23px;
+  border-radius:50%;background:var(--fg3);transition:all .2s;}
+.sw.on{background:var(--accent);border-color:var(--accent);}
+.sw.on::after{left:23px;background:#fff;}
+
+.sec{font-size:13px;color:var(--fg3);margin:22px 0 8px 2px;
+  text-transform:uppercase;letter-spacing:.5px;}
+
+/* ---------- 提示条 ---------- */
+#toast{position:fixed;left:50%;bottom:84px;
+  transform:translateX(-50%);background:#2a2f3a;color:var(--fg);
+  padding:11px 20px;border-radius:22px;font-size:14.5px;z-index:400;
+  opacity:0;transition:opacity .25s;pointer-events:none;max-width:88%;
+  text-align:center;border:1px solid var(--line);}
+#toast.on{opacity:1;}
+</style></head>
+<body>
+
+<!-- 顶部栏 -->
+<div id="top">
+  <div class="title"><span class="dot" id="dot"></span><span id="tname">DeepSeek</span></div>
+  <button class="ibtn" id="bConv" title="对话" aria-label="对话">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+  <button class="ibtn" id="bSet" title="设置" aria-label="设置">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+    </svg></button>
+</div>
+
+<!-- 聊天区 -->
+<div id="chat"><div class="empty">开始对话吧</div></div>
+
+<!-- 底部输入栏 -->
+<div id="bar">
+  <button class="rbtn" id="mic" aria-label="录音">
+    <svg id="micIcon" width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="9" y="2" width="6" height="12" rx="3"/>
+      <path d="M5 10a7 7 0 0 0 14 0M12 17v4"/>
+    </svg></button>
+  <textarea id="inp" rows="1" placeholder="输入消息…"></textarea>
+  <button class="rbtn" id="send" aria-label="发送">
+    <svg id="sendIcon" width="19" height="19" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M3.4 20.4l17.45-7.48a1 1 0 0 0 0-1.84L3.4 3.6a.993.993 0 0 0-1.39.91L2 9.12c0 .5.37.93.87.99L17 12 2.87 13.88c-.5.07-.87.5-.87 1l.01 4.61c0 .71.73 1.2 1.39.91z"/></svg></button>
+</div>
+
+<!-- 锁定遮罩 -->
+<div id="lock">
+  <div class="spin"></div>
+  <div class="txt" id="locktxt">思考中…</div>
+  <button class="btn ghost" id="stopBtn" style="width:auto;padding:10px 26px;">打断</button>
+</div>
+
+<!-- 设置面板 -->
+<div id="panel">
+  <div class="ph"><button class="ibtn" id="pBack" aria-label="返回">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M15 18l-6-6 6-6"/></svg></button><b id="pTitle">设置</b></div>
+  <div class="pb" id="pBody"></div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* =======================================================
+   桥接层：网页 -> Python
+   方式：跳转伪链接 dsv://call/<action>?d=<json>
+         Android 端 WebViewClient 会拦截，转发给 Python
+   这样避免了 addJavascriptInterface 的兼容风险
+   ======================================================= */
+var HAS_BRIDGE = (location.protocol === 'data:' ||
+                  (typeof AndroidBridgeReady !== 'undefined'));
+
+function callPython(action, payload){
+  var json = JSON.stringify(payload || {});
+  var url = 'dsv://call/' + action + '?d=' + encodeURIComponent(json);
+  try {
+    // 用 iframe 触发跳转，不离开当前页面
+    var f = document.createElement('iframe');
+    f.style.cssText = 'display:none;width:0;height:0;border:0';
+    f.src = url;
+    document.body.appendChild(f);
+    setTimeout(function(){ try{ document.body.removeChild(f); }catch(e){} }, 200);
+  } catch(e) {
+    console.log('bridge err', e);
+    try { location.href = url; } catch(e2){}
+  }
+  // 电脑浏览器预览时走模拟
+  if (!HAS_BRIDGE && location.protocol === 'file:'){
+    setTimeout(function(){ mockReply(action, payload); }, 300);
+  }
+}
+
+/* Python 调用网页的入口（Python 端 evaluateJavascript 调用） */
+window.onAIChunk = function(text){
+  appendChunk(text);
+};
+window.onAIDone = function(meta){
+  finishAI(meta);
+};
+window.onStatus = function(state, text){
+  setStatus(state, text);
+};
+window.onToast = function(text){
+  toast(text);
+};
+window.onRecordingStart = function(){ micStart(); };
+window.onRecordingStop  = function(){ micStop(); };
+window.onTheme = function(cfg){ applyTheme(cfg); };
+
+/* =======================================================
+   UI 状态
+   ======================================================= */
+var busy = false, recing = false, curBub = null, curTxt = '';
+
+function setStatus(state, text){
+  var d = document.getElementById('dot');
+  d.className = 'dot' + (state==='busy' ? ' busy' : state==='err' ? ' err' : '');
+  if (text) document.getElementById('tname').textContent = text;
+}
+
+function toast(t){
+  var e = document.getElementById('toast');
+  e.textContent = t; e.classList.add('on');
+  clearTimeout(window._tt);
+  window._tt = setTimeout(function(){ e.classList.remove('on'); }, 2000);
+}
+
+function lock(on, txt){
+  var l = document.getElementById('lock');
+  document.getElementById('locktxt').textContent = txt || '思考中…';
+  l.classList.toggle('on', !!on);
+  busy = !!on;
+  syncSendBtn();
+}
+
+var SEND_SVG = '<svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.4l17.45-7.48a1 1 0 0 0 0-1.84L3.4 3.6a.993.993 0 0 0-1.39.91L2 9.12c0 .5.37.93.87.99L17 12 2.87 13.88c-.5.07-.87.5-.87 1l.01 4.61c0 .71.73 1.2 1.39.91z"/></svg>';
+var STOP_SVG = '<svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>';
+var MIC_SVG  = '<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v4"/></svg>';
+var REC_SVG  = '<svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+
+function syncSendBtn(){
+  var s = document.getElementById('send');
+  if (busy){ s.className = 'rbtn gen'; s.innerHTML = STOP_SVG; }
+  else { s.className = 'rbtn'; s.innerHTML = SEND_SVG; }
+}
+
+/* ---------- 消息渲染 ---------- */
+function esc(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+                  .replace(/>/g,'&gt;');
+}
+function mdLite(s){
+  var t = esc(s);
+  t = t.replace(/```([\s\S]*?)```/g, function(m,c){
+    return '<pre>'+c.replace(/^\n/,'')+'</pre>'; });
+  t = t.replace(/`([^`]+)`/g, '<code>$1</code>');
+  t = t.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+  return t;
+}
+
+function addMsg(who, text, opts){
+  opts = opts || {};
+  var c = document.getElementById('chat');
+  var emp = c.querySelector('.empty');
+  if (emp) emp.remove();
+
+  var m = document.createElement('div');
+  m.className = 'msg ' + (who==='me' ? 'me' : 'ai');
+
+  var inner = '';
+  if (opts.time) inner += '<div class="meta">'+esc(opts.time)+'</div>';
+  var b = document.createElement('div');
+  b.className = 'bub';
+  if (opts.typing){
+    b.innerHTML = '<div class="typing"><i></i><i></i><i></i></div>';
+  } else if (opts.image){
+    b.innerHTML = '<img src="'+opts.image+'">';
+  } else {
+    b.innerHTML = mdLite(text);
+  }
+  inner += '';
+  m.innerHTML = inner;
+  m.appendChild(b);
+  c.appendChild(m);
+  c.scrollTop = c.scrollHeight;
+
+  if (opts.typing) return b;
+  return b;
+}
+
+function nowTime(){
+  var d = new Date();
+  return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
+}
+
+/* ---------- AI 流式输出 ---------- */
+function startAI(){
+  var c = document.getElementById('chat');
+  var m = document.createElement('div');
+  m.className = 'msg ai';
+  var b = document.createElement('div');
+  b.className = 'bub';
+  b.innerHTML = '<div class="typing"><i></i><i></i><i></i></div>';
+  m.appendChild(b);
+  c.appendChild(m);
+  c.scrollTop = c.scrollHeight;
+  curBub = b; curTxt = '';
+}
+
+function appendChunk(text){
+  if (!curBub) startAI();
+  curTxt += text;
+  curBub.innerHTML = mdLite(curTxt);
+  var c = document.getElementById('chat');
+  c.scrollTop = c.scrollHeight;
+}
+
+function finishAI(meta){
+  if (curBub){
+    if (!curTxt) curBub.innerHTML = '<span style="color:#6b7280">（无回复）</span>';
+    else curBub.innerHTML = mdLite(curTxt);
+  }
+  curBub = null; curTxt = '';
+  lock(false);
+  if (meta && meta.image){
+    addMsg('ai', '', {image: meta.image, time: nowTime()});
+  }
+}
+
+/* ---------- 发送 ---------- */
+function doSend(){
+  if (busy){ callPython('interrupt', {}); return; }
+  var i = document.getElementById('inp');
+  var t = i.value.trim();
+  if (!t) return;
+  addMsg('me', t, {time: nowTime()});
+  i.value = ''; autoGrow();
+  lock(true, '思考中…');
+  callPython('send', {text: t});
+}
+
+function autoGrow(){
+  var i = document.getElementById('inp');
+  i.style.height = 'auto';
+  i.style.height = Math.min(i.scrollHeight, 110) + 'px';
+}
+
+/* ---------- 录音 ---------- */
+function micStart(){
+  recing = true;
+  var m = document.getElementById('mic');
+  m.classList.add('rec'); m.innerHTML = REC_SVG;
+  toast('正在录音…再点一次结束');
+}
+function micStop(){
+  recing = false;
+  var m = document.getElementById('mic');
+  m.classList.remove('rec'); m.innerHTML = MIC_SVG;
+}
+function toggleMic(){
+  if (recing){ callPython('stop_record', {}); micStop(); }
+  else { callPython('start_record', {}); }
+}
+
+/* =======================================================
+   事件绑定
+   ======================================================= */
+document.getElementById('send').onclick = doSend;
+document.getElementById('mic').onclick  = toggleMic;
+document.getElementById('stopBtn').onclick = function(){
+  callPython('interrupt', {}); lock(false);
+};
+document.getElementById('bSet').onclick = function(){ openPanel('settings'); };
+document.getElementById('bConv').onclick = function(){ openPanel('conversations'); };
+document.getElementById('pBack').onclick = function(){ closePanel(); };
+
+var inp = document.getElementById('inp');
+inp.addEventListener('input', autoGrow);
+inp.addEventListener('keydown', function(e){
+  if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); doSend(); }
+});
+
+/* =======================================================
+   面板
+   ======================================================= */
+function openPanel(kind){
+  var p = document.getElementById('panel');
+  var t = document.getElementById('pTitle');
+  var b = document.getElementById('pBody');
+  p.classList.add('on');
+  if (kind === 'settings'){ t.textContent = '设置'; b.innerHTML = settingsHTML(); }
+  else if (kind === 'conversations'){ t.textContent='对话记录'; b.innerHTML = convHTML(); }
+  callPython('panel_open', {kind: kind});
+}
+function closePanel(){
+  document.getElementById('panel').classList.remove('on');
+  callPython('panel_close', {});
+}
+
+function settingsHTML(){
+  return ''
+  + '<div class="sec">API 配置</div>'
+  + '<div class="field"><label>DeepSeek API Key</label>'
+  +   '<input type="password" id="sKey" placeholder="sk-..."></div>'
+  + '<div class="field"><label>模型</label>'
+  +   '<select id="sModel">'
+  +   '<option value="deepseek-chat">deepseek-chat</option>'
+  +   '<option value="deepseek-reasoner">deepseek-reasoner</option>'
+  +   '</select></div>'
+  + '<div class="sec">功能开关</div>'
+  + '<div class="row"><div><div class="lb">语音播报</div>'
+  +   '<div class="ds">AI 回复自动朗读</div></div>'
+  +   '<div class="sw" id="sTTS"></div></div>'
+  + '<div class="row"><div><div class="lb">联网搜索</div>'
+  +   '<div class="ds">允许 AI 联网查资料</div></div>'
+  +   '<div class="sw" id="sWeb"></div></div>'
+  + '<div class="row"><div><div class="lb">流式输出</div>'
+  +   '<div class="ds">逐字显示回复</div></div>'
+  +   '<div class="sw on" id="sStream"></div></div>'
+  + '<div class="sec">其他</div>'
+  + '<button class="btn" id="sSave">保存设置</button>'
+  + '<button class="btn ghost" id="sClear">清空当前对话</button>';
+}
+
+function convHTML(){
+  return '<div id="convList"><div class="empty" style="text-align:center;'
+    + 'color:#6b7280;padding:40px">加载中…</div></div>';
+}
+
+/* 设置面板交互（面板打开后再绑定） */
+document.addEventListener('click', function(e){
+  var sw = e.target.closest('.sw');
+  if (sw) sw.classList.toggle('on');
+  if (e.target.id === 'sSave'){
+    var v = {
+      api_key: (document.getElementById('sKey')||{}).value || '',
+      model:   (document.getElementById('sModel')||{}).value || '',
+      tts:     document.getElementById('sTTS').classList.contains('on'),
+      web:     document.getElementById('sWeb').classList.contains('on'),
+      stream:  document.getElementById('sStream').classList.contains('on')
+    };
+    callPython('save_settings', v);
+    toast('设置已保存');
+  }
+  if (e.target.id === 'sClear'){
+    document.getElementById('chat').innerHTML =
+      '<div class="empty">开始对话吧</div>';
+    callPython('clear_chat', {});
+    closePanel();
+  }
+});
+
+function applyTheme(cfg){ /* 预留 */ }
+
+/* =======================================================
+   没桥接时的模拟（电脑浏览器预览用）
+   ======================================================= */
+function mockReply(action, payload){
+  if (action === 'send'){
+    lock(true, '思考中…');
+    startAI();
+    var demo = '这是**模拟回复**。真机上会显示 AI 的真实回答。';
+    var i = 0;
+    var tm = setInterval(function(){
+      if (i >= demo.length){ clearInterval(tm); finishAI({}); return; }
+      appendChunk(demo[i++]);
+    }, 35);
+  }
+}
+
+
+/* 初始 */
+syncSendBtn();
+console.log('DSV Web UI 就绪 · bridge =', HAS_BRIDGE);
+
+/* 通知 Python：页面已就绪，可以推配置过来了 */
+window.addEventListener('load', function(){
+  setTimeout(function(){ callPython('ready', {}); }, 300);
+});
+</script>
+</body></html>
