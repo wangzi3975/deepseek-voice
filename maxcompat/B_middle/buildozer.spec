@@ -15,7 +15,7 @@ orientation = landscape, portrait, landscape-reverse, portrait-reverse
 fullscreen = 0
 icon.filename = %(source.dir)s/icon/app_icon.png
 
-p4a.branch = v2023.09.15
+p4a.branch = v2023.09.16
 
 android.permissions = INTERNET,ACCESS_NETWORK_STATE,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
 android.minapi = 21
